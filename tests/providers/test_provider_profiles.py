@@ -14,6 +14,37 @@ class TestRegistry:
 
 
 
+class TestAnthropicProfile:
+    def test_canonical_name(self):
+        p = get_provider_profile("anthropic")
+        assert p is not None
+        assert p.name == "anthropic"
+
+    def test_subscription_alias_resolves_to_anthropic(self):
+        # `claude_subscription` is the subscription-OAuth alias requested by the
+        # issue — it must resolve to the existing anthropic profile, not a new
+        # provider.
+        p = get_provider_profile("claude_subscription")
+        assert p is not None
+        assert p.name == "anthropic"
+
+    def test_subscription_dash_alias_resolves_to_anthropic(self):
+        p = get_provider_profile("claude-subscription")
+        assert p is not None
+        assert p.name == "anthropic"
+
+    def test_existing_claude_aliases_still_resolve(self):
+        for alias in ("claude", "claude-oauth", "claude-code"):
+            assert get_provider_profile(alias).name == "anthropic"
+
+    def test_subscription_flag_not_in_env_vars(self):
+        # HERMES_CLAUDE_SUBSCRIPTION_AUTH is a boolean hint, not an API key —
+        # it must never be registered as a credential env var (that would make
+        # "1" look like an Anthropic key).
+        p = get_provider_profile("anthropic")
+        assert "HERMES_CLAUDE_SUBSCRIPTION_AUTH" not in p.env_vars
+
+
 class TestNvidiaProfile:
     def test_max_tokens(self):
         p = get_provider_profile("nvidia")

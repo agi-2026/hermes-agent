@@ -3012,6 +3012,44 @@ def _model_flow_api_key_provider(config, provider_id, current_model=""):
     else:
         print("No change.")
 
+# Env flag that biases the Anthropic setup flow toward the Claude Pro/Max
+# subscription OAuth path (over an API key). Symmetric to auto-detecting
+# ~/.claude/ credentials — the issue asks for "a new env var, e.g.
+# HERMES_CLAUDE_SUBSCRIPTION_AUTH=1, OR auto-detect when ~/.claude/ credentials
+# exist and no Anthropic API key is set." Auto-detection already works via
+# read_claude_code_credentials(); this flag is the explicit opt-in.
+_CLAUDE_SUBSCRIPTION_AUTH_ENV = "HERMES_CLAUDE_SUBSCRIPTION_AUTH"
+
+# Shown when a user selects the subscription-OAuth path. Anthropic's Agent SDK
+# subscription credit is, per their Help Center, "sized for individual
+# experimentation" — shared multi-tenant automation should still use an API key.
+# https://support.claude.com/en/articles/15036540-use-the-claude-agent-sdk-with-your-claude-plan
+_CLAUDE_SUBSCRIPTION_SHARED_USE_WARNING = (
+    "  ⚠ Claude subscription auth is sized for individual experimentation.\n"
+    "    For shared or multi-user deployments (production, multi-tenant\n"
+    "    automation), use an Anthropic API key instead — routing many users\n"
+    "    through one subscription may exceed the plan's Agent SDK credit and\n"
+    "    can violate Anthropic's terms. See:\n"
+    "    https://support.claude.com/en/articles/15036540-use-the-claude-agent-sdk-with-your-claude-plan"
+)
+
+
+def _claude_subscription_auth_requested() -> bool:
+    """Return True when HERMES_CLAUDE_SUBSCRIPTION_AUTH is set to a truthy value.
+
+    Truthy = 1/true/yes/on (case-insensitive). Empty/0/false/unset → False.
+    """
+    val = os.getenv(_CLAUDE_SUBSCRIPTION_AUTH_ENV, "").strip().lower()
+    return val in {"1", "true", "yes", "on"}
+
+
+def _print_claude_subscription_shared_use_warning() -> None:
+    """Print the shared/multi-user caveat for Claude subscription OAuth."""
+    print()
+    print(_CLAUDE_SUBSCRIPTION_SHARED_USE_WARNING)
+    print()
+
+
 def _model_flow_anthropic(config, current_model=""):
     """Flow for Anthropic provider — OAuth subscription, API key, or Claude Code creds."""
     from hermes_cli.main import _run_anthropic_oauth_flow
@@ -3087,21 +3125,34 @@ def _model_flow_anthropic(config, current_model=""):
         # choice == "use" or default: use existing, proceed to model selection
 
     if needs_auth:
+        # When HERMES_CLAUDE_SUBSCRIPTION_AUTH=1 is set, bias the picker toward
+        # the subscription-OAuth path: pressing Enter selects option 1 instead
+        # of cancelling. The user can still type 2 to fall back to an API key.
+        subscription_requested = _claude_subscription_auth_requested()
+        default_choice = "1" if subscription_requested else ""
+
         # Show auth method choice
         print()
+        if subscription_requested:
+            print(
+                f"  {_CLAUDE_SUBSCRIPTION_AUTH_ENV}=1 detected — defaulting to Claude subscription (OAuth)."
+            )
+            print()
         print("  Choose authentication method:")
         print()
         print("    1. Claude Pro/Max subscription (OAuth login)")
         print("    2. Anthropic API key (pay-per-token)")
         print("    3. Cancel")
         print()
+        prompt = "  Choice [1/2/3]: " if not default_choice else "  Choice [1/2/3] (default 1): "
         try:
-            choice = input("  Choice [1/2/3]: ").strip()
+            choice = input(prompt).strip() or default_choice
         except (KeyboardInterrupt, EOFError):
             print()
             return
 
         if choice == "1":
+            _print_claude_subscription_shared_use_warning()
             if not _run_anthropic_oauth_flow(save_env_value):
                 return
 
